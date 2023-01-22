@@ -1,0 +1,37 @@
+<html>
+<head>
+	<title>Pnp server example</title>
+	<script src="script.js"></script>
+</head>
+
+<body>
+	<h1>PnP Server - example page</h1>
+	
+	<p>This page illustrates two different apps being loaded and used with the PnP Server.</p>
+	<div id="first-app" style="max-width:500px;border:1px solid black;margin: 1px;padding:10px;">
+		<p>The first app, called "Prime", uses a GET method to send a number, typed by the user, and returns whether this number is prime or not (in which case it also returns the closest prime). It does so by loading a pre-calculated table of primes into the app permanent storage at server start-up - using the AppInit() method.</p>
+	
+		<input type="text" id="number">
+		<button type="button" id="prime-button" onclick="PrimeMethod();">Is it prime?</button>
+		<div id="show-prime"></div>
+	</div>
+	
+	<div id="second-app" style="max-width:500px;border:1px solid black;margin: 1px;padding:10px;">
+		<p>The second app, called "Modify", uses a POST method to send a form with an image, selected by the user, and a modification to make - either make it sepia, or greyscale (app uses stb_image and stb_image_write to do read/write). Max filesize is 10MB, and allowed formats are JPEG, PNG, and BMP.</p>
+		
+		<form id="modify">
+			<input type="radio" id="modify-sepia" name="modify" value="s">
+			<label for="modify-sepia">Sepia</label><br>
+			<input type="radio" id="modify-grey" name="modify" value="g">
+			<label for="modify-grey">Greyscale</label><br>
+			
+			<label for="modify-image">Select an image:</label>
+			<input type="file" id="modify-image" name="image">
+		</form>
+		<button type="button" id="modify-button" onclick="ModifyMethod();">Send</button><br>
+		
+		<div id="error-modify"></div>
+		<img id="show-modify" style="max-height:300px;max-width:400px;margin:5px;">
+	</div>
+</body>
+</html>

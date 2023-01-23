@@ -1,0 +1,6 @@
+[submodule "include/TinyBase"]
+	path = include/TinyBase
+	url = https://github.com/robertofig85/TinyBase
+[submodule "include/TinyServer"]
+	path = include/TinyServer
+	url = https://github.com/robertofig85/TinyServer

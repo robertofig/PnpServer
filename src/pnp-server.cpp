@@ -128,7 +128,7 @@ ExtToMIME(string Ext)
 }
 
 internal bool
-RecvFullRequestBody(ts_io* Conn, ts_request_body* Body, usz MaxBodySize)
+RecvFullRequestBody(ts_io* Conn, ts_body* Body, usz MaxBodySize)
 {
     io_info* Info = (io_info*)&Conn[1];
     Info->Stage = IoStage_ReadingBody;
@@ -307,28 +307,37 @@ internal void
 ProcessReading(ts_io* Conn, io_info* Info)
 {
     string InBuffer = String(Info->IoBuffer, Conn->BytesTransferred, Info->IoBufferSize, EC_ASCII);
-    ts_http_parse Result = ParseHttpHeader(InBuffer, &Info->Request, &Info->Body);
+    ts_http_parse Result = ParseHttpHeader(InBuffer, &Info->Request);
     
-    switch (Result)
+    if (Result == HttpParse_OK)
     {
-        case HttpParse_BodyIncomplete:
-        {
-            // If too large, break connection.
-            if (Info->Body.Size > SERVER_MAX_BODY_SIZE)
-            {
-                Info->Stage = IoStage_Terminating;
-                SendToIoQueue(Info->IoQueue, Conn);
-                break;
-            }
-        }
+        string Resource = String(Info->Request.Base + Info->Request.UriOffset, Info->Request.PathSize, 0, EC_ASCII);
         
-        case HttpParse_OK:
+        switch (Info->Request.Verb)
         {
-            string Resource = String(Info->Request.Base + Info->Request.UriOffset, Info->Request.PathSize, 0, EC_ASCII);
+            case HttpVerb_Post:
+            case HttpVerb_Put:
+            {
+                Info->Body = GetBodyInfo(&Info->Request);
+                if (Info->Body.Base)
+                {
+                    // If too large, break connection.
+                    if (Info->Body.Size > SERVER_MAX_BODY_SIZE)
+                    {
+                        Info->Stage = IoStage_Terminating;
+                        SendToIoQueue(Info->IoQueue, Conn);
+                        break;
+                    }
+                }
+                else
+                {
+                    Info->Response.StatusCode = 400;
+                    PrepareResponse(Conn, Info);
+                    break;
+                }
+            }
             
-            if (Info->Request.Verb == HttpVerb_Post
-                || Info->Request.Verb == HttpVerb_Put
-                || Info->Request.Verb == HttpVerb_Delete)
+            case HttpVerb_Delete:
             {
                 app_info* AppInfo = GetResourceAppInfo(Resource);
                 if (AppInfo)
@@ -341,9 +350,9 @@ ProcessReading(ts_io* Conn, io_info* Info)
                     Info->Response.StatusCode = 404;
                     PrepareResponse(Conn, Info);
                 }
-            }
+            } break;
             
-            else if (Info->Request.Verb == HttpVerb_Get)
+            case HttpVerb_Get:
             {
                 string Ext;
                 app_info* AppInfo = GetResourceAppInfo(Resource);
@@ -389,34 +398,35 @@ ProcessReading(ts_io* Conn, io_info* Info)
                     Info->Response.StatusCode = 404;
                     PrepareResponse(Conn, Info);
                 }
-            }
-            else // Implement new Verbs here.
+            } break;
+            
+            default: // Implement new Verbs here.
             {
                 Info->Response.StatusCode = 501;
                 PrepareResponse(Conn, Info);
             }
-        } break;
-        
-        case HttpParse_HeaderIncomplete:
-        {
-            void* InBuffer[1] = { Info->IoBuffer + Info->Request.HeaderSize };
-            u32 InBufferSize[1] = { Info->IoBufferSize - Info->Request.HeaderSize };
-            Info->Stage = IoStage_Reading;
-            RecvPackets(Conn, InBuffer, InBufferSize, 1);
-        } break;
-        
-        case HttpParse_HeaderInvalid:
-        case HttpParse_HeaderMalicious:
-        {
-            Info->Response.StatusCode = 400;
-            PrepareResponse(Conn, Info);
-        } break;
-        
-        case HttpParse_TooManyHeaders:
-        {
-            Info->Stage = IoStage_Terminating;
-            SendToIoQueue(Info->IoQueue, Conn);
-        } break;
+        }
+    }
+    
+    else if (Result == HttpParse_HeaderIncomplete)
+    {
+        void* InBuffer[1] = { Info->IoBuffer + Info->Request.HeaderSize };
+        u32 InBufferSize[1] = { Info->IoBufferSize - Info->Request.HeaderSize };
+        Info->Stage = IoStage_Reading;
+        RecvPackets(Conn, InBuffer, InBufferSize, 1);
+    }
+    
+    else if (Result == HttpParse_HeaderInvalid
+             || Result == HttpParse_HeaderMalicious)
+    {
+        Info->Response.StatusCode = 400;
+        PrepareResponse(Conn, Info);
+    }
+    
+    else if (Result == HttpParse_TooManyHeaders)
+    {
+        Info->Stage = IoStage_Terminating;
+        SendToIoQueue(Info->IoQueue, Conn);
     }
 }
 

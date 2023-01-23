@@ -59,12 +59,12 @@ struct io_info
     char* IoBuffer;
     
     ts_request Request;
-    ts_request_body Body;
+    ts_body Body;
     ts_response Response;
     
     app_info* AppInfo;
 };
 
-internal bool RecvFullRequestBody(ts_io* Conn, ts_request_body* Body, usz MaxBodySize);
+internal bool RecvFullRequestBody(ts_io* Conn, ts_body* Body, usz MaxBodySize);
 
 #endif //PNP_SERVER_H

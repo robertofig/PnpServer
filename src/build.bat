@@ -2,7 +2,7 @@
 
 SET TinyBase= ..\include\TinyBase\src
 SET TinyServer= ..\include\TinyServer\src
-SET Arch= /arch:AVX2
+:: SET Arch= /arch:(AVX | AVX2 | AVX512)
 SET ReleaseCL= /Oi /O2 /EHa- /GS-
 SET ReleaseLink= /link /ENTRY:Entry /FIXED /INCREMENTAL:NO /OPT:ICF /OPT:REF /SUBSYSTEM:CONSOLE libvcruntime.lib ucrt.lib
 SET DebugCL= /Zi /MTd /RTC1 /DPNP_DEBUG

@@ -27,18 +27,18 @@ PnP Server depends on some files from TinyBase and TinyServer. Both these projec
 To build an app to it, one must included the [pnp-server-app.h](src/pnp-server-app.h) header file, present in the `/include` dir. You can copy it to the app working area and include it from there. It must also contain the following two functions:
 
 ```c
-void ModuleMain(http* Http);
+void ModuleMain(http* Http, app_arena* Arena);
 
 void AppInit(app_arena* Arena);
 ```
 
 The app must be built as a dynamic library. When building the app, these two functions must have unmangled symbol name (use `extern "C"` when compiling in C++) and must be exported, as the symbols are loaded during runtime.
 
-## How do the apps work?
-
-Every app has at least one method, called `ModuleMain`. It is the app's entry point from the webserver. It takes a pointer to an `http` object, which contains details from the request, such as URI, number of headers, if it has a body or not, etc (more details can be found in `pnp-server-app.h`). It also has methods for accessing the request data, and writing back the response (the formatting is taken care of by the server). After the app finishes processing, it exits ModuleMain returning nothing.
+## How do apps work?
 
 Every app has a persistent memory buffer just for it, stored in an `app_arena` object. It has a [.Ptr] to the top of the buffer, a [.WriteCur] for the amount written so far in it, and the total size of it in [.Size]. It is passed to the application via the `http` object in ModuleMain. Several threads may be accessing it at the same time, it is the app's job to handle concurrent writes. The app is also responsible for updating the WriteCur, and making sure it does not write past Size.
+
+Every app must also implement at least one method, called `ModuleMain`. It is the app's entry point from the webserver. It takes a pointer to an `http` object, and a pointer to its `app_arena`. The `http` object contains details from the request, such as URI, number of headers, if it has a body or not, etc (more details can be found in `pnp-server-app.h`). It also has methods for accessing the request data, and writing back the response (the formatting is taken care of by the server). After the app finishes processing, it exits ModuleMain returning nothing.
 
 The app may also implement a second method, called `AppInit`. This one is not required, but if implemented it is called once, at server startup. It takes a pointer to the `app_arena` object, so that data can be initialised and stored in it (such as database connections, file reads, etc.). The function does not need to use it, however, and can be used in any way the app sees fit.
 

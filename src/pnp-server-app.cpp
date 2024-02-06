@@ -1,5 +1,9 @@
 #include "pnp-server-app.h"
 
+// Forward declaration.
+internal bool RecvFullRequestBody(ts_io*, ts_body*, usz);
+
+
 internal http_buf
 AppGetHeaderByKey(http* Http, char* Key)
 {
@@ -83,12 +87,12 @@ AppAllocPayload(http* Http, usz Size)
     ts_io* Conn = (ts_io*)Http->Object;
     io_info* Info = (io_info*)&Conn[1];
     
-    void* Mem = GetMemory(Size, 0, MEM_READ|MEM_WRITE);
-    if (Mem)
+    buffer Mem = GetMemory(Size, 0, MEM_WRITE);
+    if (Mem.Base)
     {
-        Info->Response.Payload = (char*)Mem;
+        Info->Response.Payload = (char*)Mem.Base;
     }
-    return Mem;
+    return Mem.Base;
 }
 
 internal void*
@@ -97,10 +101,10 @@ AppAllocCookies(http* Http, usz Size)
     ts_io* Conn = (ts_io*)Http->Object;
     io_info* Info = (io_info*)&Conn[1];
     
-    void* Mem = GetMemory(Size, 0, MEM_READ|MEM_WRITE);
-    if (Mem)
+    buffer Mem = GetMemory(Size, 0, MEM_WRITE);
+    if (Mem.Base)
     {
-        Info->Response.Cookies = (char*)Mem;
+        Info->Response.Cookies = (char*)Mem.Base;
     }
-    return Mem;
+    return Mem.Base;
 }

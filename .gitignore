@@ -1,6 +1,5 @@
 /build
 /include
-/example/modify.dll
-/example/prime.dll
-/example/primes
+/example/modify/
+/example/prime/
 afazer.txt

@@ -6,15 +6,31 @@ PnP stands for Plug-and-Play, a concept of simplicity and ease of use. Getting t
 
 ## How to use?
 
-After building it (see build instructions below), the server is a single executable called `pnp-server`. By default, the server runs on port 50000. Currently this value is hardcoded, but the ability to change it will come in the next release. You can run it from command line, with an optional argument to set the root directory (by default, the root dir is where the executable is located):
+After building it (see build instructions below), the server is a single executable called `pnp-server`. You can run it from command line, with an optional argument to set the root directory, files folder, and port:
 
 ```
->: pnp-server [path-to-root-dir]
+>: pnp-server [path-to-root-dir] [files-folder-name] [port]
 ```
 
-The root dir is where everything happens. It must have a folder called `wwwroot`, which is the base for the static files (so, the resource for `www.my-website.com/index.html` will be located at `[root-dir]/wwwroot/index.html`). All files served by the webserver must be inside it.
+If not specified, the default root dir is the `current working directory`, the default files folder name is `wwwroot`, and the default port is `8080`.
 
-It is also where apps are located. All one needs to do is drop the compiled app (as a dynamic library) in there, the server will add it to a list and it will be up and running. The filename of the app determines the URL path to access it. So, if you have an file called `myapp.dll`, the path to access it is `www.my-website.com/myapp`. This will make the webserver enter the app, and it takes control from there.
+The root dir is where everything happens. The files folder must be inside it, which is the base for the static files (so, the resource for `www.my-website.com/index.html` will be located at `[root-dir]/[files-folder]/index.html`). All files served by the webserver must be inside it.
+
+It is also where apps are located. Each app must have its own folder, and inside it the compiled app (as a dynamic library), as well as auxiliary files the app may need. The folder name and app filename must be the same. A schematics of a root dir is as follows:
+
+```
+root
+  |--- [files-folder]
+  |       |--- index.html
+  |       |--- script.js
+  |--- [app1]
+  |       |--- app1.dll
+  |--- [app2]
+          |--- app2.dll
+          |--- table.xml
+```
+
+All one needs to do is drop the folder in the root dir, the server will automatically add it to the list and have it up and running. The filename of the app determines the URL path to access it. So, if you have an file called `myapp.dll`, the path to access it is `www.my-website.com/myapp`. This will make the webserver enter the app, and it takes control from there.
 
 ## How to build the server
 
@@ -51,7 +67,7 @@ The `/example` folder contains a working example of a website with two apps:
 * [Prime](/example/src/prime.c):  it receives a number from the client and returns if it's prime, or the closest prime if not. It uses the AppInit() function to load a table of primes into the app_arena.
 * [Modify](/example/src/modify.cpp): it receives an image uploaded by the client and returns it in sepia or greyscale.
 
-The source of both apps is in `/example/src`, and must be built with the build script in it in order to run. After they are built, run the server pointing the root directory to `/example`, then start navigating from `localhost:50000/index.html`. The apps are accessed from there.
+The source of both apps is in `/example/src`, and must be built with the build script in it in order to run. After they are built, run the server pointing the root directory to `/example`, then start navigating from `localhost:[PORT]/index.html`. The apps are accessed from there.
 
 ## License
 

@@ -86,7 +86,7 @@ AppInit(void* Param)
 {
     app_arena* Arena = (app_arena*)Param;
     
-    FILE* File = fopen("..\\example\\primes", "rb");
+    FILE* File = fopen("../example/prime/primes", "rb");
     if (File)
     {
         fseek(File, 0, SEEK_END);

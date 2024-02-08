@@ -711,7 +711,7 @@ PnpAppServer(parsed_args Args)
         MPSCFreeListPush(&SocketList, Conn);
     }
     
-    u32 NumThreads = gSysInfo.NumThreads;
+    u32 NumThreads = 1; //gSysInfo.NumThreads;
     for (usz Count = 0; Count < NumThreads; Count++)
     {
         thread Thread = InitThread(IoThread, &SocketList, true);

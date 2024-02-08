@@ -1,5 +1,3 @@
-#include "pnp-server-app.h"
-
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_NO_STDIO
 #include "stb_image.h"
@@ -8,8 +6,11 @@
 #define STBI_WRITE_NO_STDIO
 #include "stb_image_write.h"
 
+#include <stddef.h>
 #include <string.h>
 #include <stdlib.h>
+
+#include "pnp-server-app.h"
 
 #define MAX_FILE_SIZE (10 * 1024 * 1024) // 10 Megabytes
 

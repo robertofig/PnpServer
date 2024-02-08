@@ -1,8 +1,9 @@
-#include "pnp-server-app.h"
-
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+
+#include "pnp-server-app.h"
 
 #define Equals(A, B, Size) !memcmp(A, B, Size)
 #define QUERY_KEY "number"
@@ -132,14 +133,18 @@ ModuleMain(http* Http)
                 if (ClosestPrime == Number)
                 {
                     memcpy(Payload, RET_PRIME, sizeof(RET_PRIME));
-                    char* Ptr = itoa(ClosestPrime, Payload + sizeof(RET_PRIME)-1, 10);
-                    Ptr[strlen(Ptr)] = '}';
+                    char* Num = Payload + sizeof(RET_PRIME) - 1;
+                    int SizeLeft = RET_SIZE - sizeof(RET_PRIME) + 1;
+                    int NumSize = snprintf(Num, SizeLeft, "%d", ClosestPrime);
+                    Num[NumSize] = '}';
                 }
                 else
                 {
                     memcpy(Payload, RET_NOT_PRIME, sizeof(RET_NOT_PRIME));
-                    char* Ptr = itoa(ClosestPrime, Payload + sizeof(RET_NOT_PRIME)-1, 10);
-                    Ptr[strlen(Ptr)] = '}';
+                    char* Num = Payload + sizeof(RET_NOT_PRIME) - 1;
+                    int SizeLeft = RET_SIZE - sizeof(RET_NOT_PRIME) + 1;
+                    int NumSize = snprintf(Num, SizeLeft, "%d", ClosestPrime);
+                    Num[NumSize] = '}';
                 }
             }
             

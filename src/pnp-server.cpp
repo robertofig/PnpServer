@@ -116,6 +116,8 @@ GetResourceAppInfo(string Resource)
     
     for (i32 AppIdx = 0; AppIdx < gServerInfo.NumApps; AppIdx++)
     {
+        // TODO: change this to a hashtable lookup.
+        
         app_info* AppInfo = &gServerInfo.Apps[AppIdx];
         string AppName = String(AppInfo->Name, AppInfo->NameSize, 0, EC_ASCII);
         if (EqualStrings(AppName, Resource))
@@ -132,6 +134,7 @@ internal char*
 ExtToMIME(string Ext)
 {
     // TODO: change this to a hashtable lookup.
+    // TODO: implement full list of MIME types here.
     
     if (EqualStrings(Ext, StringLit("htm"))) return "text/html; charset=utf-8";
     if (EqualStrings(Ext, StringLit("html"))) return "text/html; charset=utf-8";
@@ -157,96 +160,75 @@ ExtToMIME(string Ext)
 internal bool
 RecvFullRequestBody(ts_io* Conn, ts_body* Body, usz MaxBodySize)
 {
-    io_info* Info = (io_info*)&Conn[1];
-    Info->IoStage = IoStage_ReadingBody;
+    io_aux* Aux = (io_aux*)&Conn[1];
+    Aux->IoStage = IoStage_ReadingBody;
     
-    u64 AmountReceived = Info->IoBuffer.WriteCur - Info->Request.HeaderSize;
+    u64 AmountReceived = Aux->IoBuffer.WriteCur - Aux->Request.HeaderSize;
     u64 AmountToRecv = Body->Size - AmountReceived;
-    u64 AmountLeftOnIoBuffer = Info->IoBuffer.Size - Info->IoBuffer.WriteCur;
+    u64 AmountLeftOnIoBuffer = Aux->IoBuffer.Size - Aux->IoBuffer.WriteCur;
     
-    // If size is too big, read in place until it has read everything. This is so we
-    // can return a response with status code 413. Many clients (like browsers) only
-    // start reading after sending their entire payload, so this makes sure it's read,
-    // but not processed. Content of read is discarded.
-    
-    if (Body->Size > MaxBodySize)
+    if (Body->Size <= MaxBodySize)
     {
-        Info->Response.StatusCode = 413;
+        // Checks if size left in Header buffer is enough to fit entire payload.
+        // Allocs new if not.
         
-        usz ThrowawayMemSize = Megabyte(1);
-        buffer ThrowawayMem = GetMemory(ThrowawayMemSize, 0, MEM_WRITE);
-        if (ThrowawayMem.Base)
+        if (AmountToRecv > AmountLeftOnIoBuffer)
         {
-            while (AmountToRecv > 0)
+            buffer NewBuffer = GetMemory(Body->Size, 0, MEM_READ|MEM_WRITE);
+            if (!NewBuffer.Base)
             {
-                u32 BytesToRecv = Min(AmountToRecv, ThrowawayMemSize);
-                Conn->IoBuffer = ThrowawayMem.Base;
-                Conn->IoSize = BytesToRecv;
-                RecvData(Conn);
-                
-                WaitOnSemaphore(&Info->Semaphore);
-                
-                AmountToRecv -= Conn->BytesTransferred;
+                Aux->Response.StatusCode = 503;
+                return false;
             }
-            FreeMemory(&ThrowawayMem);
+            CopyData(NewBuffer.Base, NewBuffer.Size, Body->Base, AmountReceived);
+            Body->Base = NewBuffer.Base;
         }
-        else
-        {
-            Info->IoStage = IoStage_Terminating;
-            return false;
-        }
-    }
-    
-    // Checks if size left in Header buffer is enough to fit entire payload.
-    // Allocs new if not.
-    
-    if (AmountToRecv > AmountLeftOnIoBuffer)
-    {
-        buffer NewBuffer = GetMemory(Body->Size, 0, MEM_READ|MEM_WRITE);
-        if (!NewBuffer.Base)
-        {
-            Info->Response.StatusCode = 503;
-            return false;
-        }
-        CopyData(NewBuffer.Base, NewBuffer.Size, Body->Base, AmountReceived);
-        Body->Base = NewBuffer.Base;
-    }
-    
-    // Receives entire payload.
-    while (AmountToRecv > 0)
-    {
-        u32 BytesToRecv = Min(AmountToRecv, U32_MAX);
-        Conn->IoBuffer = Body->Base + AmountReceived;
-        Conn->IoSize = BytesToRecv;
-        RecvData(Conn);
         
-        WaitOnSemaphore(&Info->Semaphore);
-        
-        AmountReceived += Conn->BytesTransferred;
-        AmountToRecv -= Conn->BytesTransferred;
+        // Receives entire payload.
+        while (AmountToRecv > 0)
+        {
+            u32 BytesToRecv = Min(AmountToRecv, U32_MAX);
+            Conn->IoBuffer = Body->Base + AmountReceived;
+            Conn->IoSize = BytesToRecv;
+            RecvData(Conn);
+            
+            // This semaphore is so we only continue after the previous recv
+            // has been dequeued (we need the BytesReceived to know how much
+            // to recv next).
+            
+            WaitOnSemaphore(&Aux->Semaphore);
+            
+            AmountReceived += Conn->BytesTransferred;
+            AmountToRecv -= Conn->BytesTransferred;
+        }
+        return true;
     }
-    
-    return true;
+    else
+    {
+        Aux->Response.StatusCode = 413;
+        DisconnectSocket(Conn, TS_DISCONNECT_RECV);
+        return false;
+    }
 }
 
 THREAD_PROC(AppThread)
 {
     ts_io* Conn = (ts_io*)Arg;
-    io_info* Info = (io_info*)&Conn[1];
+    io_aux* Aux = (io_aux*)&Conn[1];
     
     http Http = {0};
     Http.Object = Conn;
-    Http.Arena = (app_arena*)&Info->AppInfo->Arena;
-    Http.Verb = (http_verb)Info->Request.Verb;
-    Http.Path = Info->Request.Base + Info->Request.UriOffset;
-    Http.PathSize = Info->Request.PathSize;
+    Http.Arena = (app_arena*)&Aux->AppInfo->Arena;
+    Http.Verb = (http_verb)Aux->Request.Verb;
+    Http.Path = Aux->Request.Base + Aux->Request.UriOffset;
+    Http.PathSize = Aux->Request.PathSize;
     Http.Query = Http.Path + Http.PathSize + 1;
-    Http.QuerySize = Info->Request.QuerySize;
-    Http.HeaderCount = Info->Request.NumHeaders;
-    Http.Body = Info->Body.Base;
-    Http.BodySize = Info->Body.Size;
-    Http.ContentType = Info->Body.ContentType;
-    Http.ContentTypeSize = Info->Body.ContentTypeSize;
+    Http.QuerySize = Aux->Request.QuerySize;
+    Http.HeaderCount = Aux->Request.NumHeaders;
+    Http.Body = Aux->Body.Base;
+    Http.BodySize = Aux->Body.Size;
+    Http.ContentType = Aux->Body.ContentType;
+    Http.ContentTypeSize = Aux->Body.ContentTypeSize;
     
     Http.GetHeaderByKey = AppGetHeaderByKey;
     Http.GetHeaderByIdx = AppGetHeaderByIdx;
@@ -257,14 +239,14 @@ THREAD_PROC(AppThread)
     Http.AllocPayload = AppAllocPayload;
     Http.AllocCookies = AppAllocCookies;
     
-    Info->AppInfo->Entry(&Http, &Info->AppInfo->Arena);
+    Aux->AppInfo->Entry(&Http, &Aux->AppInfo->Arena);
     
-    Info->Response.StatusCode = Http.ReturnCode;
-    Info->Response.MimeType = Http.PayloadType;
-    Info->Response.PayloadSize = Http.PayloadSize;
-    Info->Response.CookiesSize = Http.CookiesSize;
+    Aux->Response.StatusCode = Http.ReturnCode;
+    Aux->Response.MimeType = Http.PayloadType;
+    Aux->Response.PayloadSize = Http.PayloadSize;
+    Aux->Response.CookiesSize = Http.CookiesSize;
     
-    Info->IoStage = IoStage_App; // Has to be reset here because app can change it.
+    Aux->IoStage = IoStage_App; // Has to be reset here because app can change it.
     Conn->BytesTransferred = 0;
     SendToIoQueue(Conn);
     
@@ -272,7 +254,7 @@ THREAD_PROC(AppThread)
 }
 
 internal void
-EnterApp(ts_io* Conn, io_info* Info)
+EnterApp(ts_io* Conn, io_aux* Aux)
 {
     // TODO: Take thread from threadpool, only create new one if pool is empty.
     
@@ -281,18 +263,18 @@ EnterApp(ts_io* Conn, io_info* Info)
 }
 
 internal void
-PrepareResponse(ts_io* Conn, io_info* Info)
+PrepareResponse(ts_io* Conn, io_aux* Aux)
 {
-    if (Info->Response.StatusCode == 200)
+    if (Aux->Response.StatusCode == 200)
     {
-        string Connection = GetHeaderByKey(&Info->Request, "Connection");
-        Info->Response.KeepAlive = (EqualStrings(Connection, StringLit("keep-alive"))
-                                    || EqualStrings(Connection, StringLit("Keep-Alive")));
-        Info->Response.Version = Info->Request.Version;
+        string Connection = GetHeaderByKey(&Aux->Request, "Connection");
+        Aux->Response.KeepAlive = (EqualStrings(Connection, StringLit("keep-alive"))
+                                   || EqualStrings(Connection, StringLit("Keep-Alive")));
+        Aux->Response.Version = Aux->Request.Version;
     }
     
-    string OutBuffer = String(Info->IoBuffer.Base, 0, Info->IoBuffer.Size, EC_ASCII);
-    CraftHttpResponseHeader(&Info->Response, &OutBuffer, gServerInfo.ServerName);
+    string OutBuffer = String(Aux->IoBuffer.Base, 0, Aux->IoBuffer.Size, EC_ASCII);
+    CraftHttpResponseHeader(&Aux->Response, &OutBuffer, gServerInfo.ServerName);
     
     Conn->BytesTransferred = 0;
     Conn->IoBuffer = (u8*)OutBuffer.Base;
@@ -300,42 +282,69 @@ PrepareResponse(ts_io* Conn, io_info* Info)
 }
 
 internal void
-ProcessReading(ts_io* Conn, io_info* Info)
+PreparePayload(string Resource, io_aux* Aux, string Ext)
+{
+    char ResourcePathBuf[MAX_PATH_SIZE] = {0};
+    path ResourcePath = Path(ResourcePathBuf);
+    AdvanceString(&Resource, 1);
+    AppendDataToPath(gServerInfo.FilesPath, gServerInfo.FilesPathSize, &ResourcePath);
+    AppendStringToPath(Resource, &ResourcePath);
+    
+    file File = OpenFileHandle(ResourcePathBuf, READ_SHARE);
+    if (File != INVALID_FILE)
+    {
+        Aux->Response.Payload = (char*)File;
+        Aux->Response.PayloadSize = FileSizeOf(File);
+        Aux->Response.MimeType = ExtToMIME(Ext);
+        Aux->Response.PayloadIsFile = true;
+        
+        Aux->Response.StatusCode = 200;
+        Aux->IoStage = IoStage_SendingHeader;
+    }
+    else // File not found.
+    {
+        Aux->Response.StatusCode = 404;
+        Aux->IoStage = IoStage_SendingHeader;
+    }
+}
+
+internal void
+ProcessReading(ts_io* Conn, io_aux* Aux)
 {
     string InBuffer = {0};
-    InBuffer.Buffer = Info->IoBuffer;
+    InBuffer.Buffer = Aux->IoBuffer;
     InBuffer.Enc = EC_ASCII;
-    ts_http_parse Result = ParseHttpHeader(InBuffer, &Info->Request);
+    ts_http_parse Result = ParseHttpHeader(InBuffer, &Aux->Request);
     
     if (Result == HttpParse_OK)
     {
-        string Resource = String(Info->Request.Base + Info->Request.UriOffset,
-                                 Info->Request.PathSize, 0, EC_ASCII);
+        string Resource = String(Aux->Request.Base + Aux->Request.UriOffset,
+                                 Aux->Request.PathSize, 0, EC_ASCII);
         
-        switch (Info->Request.Verb)
+        switch (Aux->Request.Verb)
         {
             case HttpVerb_Post:
             case HttpVerb_Put:
             {
-                Info->Body = GetBodyInfo(&Info->Request);
-                if (Info->Body.Base)
+                Aux->Body = GetBodyInfo(&Aux->Request);
+                if (Aux->Body.Base)
                 {
                     // This may not be the entire body. Further reads to receive
                     // the rest of the body may be performed in the app, if
                     // necessary.
                     
-                    if (Info->Body.Size > SERVER_MAX_BODY_SIZE)
+                    if (Aux->Body.Size > SERVER_MAX_BODY_SIZE)
                     {
                         // Body too large, break connection.
-                        Info->IoStage = IoStage_Terminating;
+                        Aux->IoStage = IoStage_Terminating;
                         break;
                     }
                     else { /* Falls back to HttpVerb_Delete below. */ }
                 }
                 else
                 {
-                    Info->Response.StatusCode = 400;
-                    Info->IoStage = IoStage_SendingHeader;
+                    Aux->Response.StatusCode = 400;
+                    Aux->IoStage = IoStage_SendingHeader;
                     break;
                 }
             }
@@ -345,88 +354,71 @@ ProcessReading(ts_io* Conn, io_info* Info)
                 app_info* AppInfo = GetResourceAppInfo(Resource);
                 if (AppInfo)
                 {
-                    Info->AppInfo = AppInfo;
-                    Info->IoStage = IoStage_App;
+                    Aux->AppInfo = AppInfo;
+                    Aux->IoStage = IoStage_App;
                 }
                 else
                 {
-                    Info->Response.StatusCode = 404;
-                    Info->IoStage = IoStage_SendingHeader;
+                    Aux->Response.StatusCode = 404;
+                    Aux->IoStage = IoStage_SendingHeader;
                 }
             } break;
             
             case HttpVerb_Get:
             {
-                string Ext;
-                app_info* AppInfo = GetResourceAppInfo(Resource);
-                if (AppInfo)
+                string Ext = GetResourceExt(Resource);
+                if (Ext.Base)
                 {
-                    Info->AppInfo = AppInfo;
-                    Info->IoStage = IoStage_App;
+                    // If it has an extension, it's a file.
+                    PreparePayload(Resource, Aux, Ext);
                 }
-                else if ((Ext = GetResourceExt(Resource)).Base)
+                else
                 {
-                    char ResourcePathBuf[MAX_PATH_SIZE] = {0};
-                    path ResourcePath = Path(ResourcePathBuf);
-                    AdvanceString(&Resource, 1);
-                    AppendDataToPath(gServerInfo.FilesPath, gServerInfo.FilesPathSize,
-                                     &ResourcePath);
-                    AppendStringToPath(Resource, &ResourcePath);
-                    
-                    file File = OpenFileHandle(ResourcePathBuf, READ_SHARE);
-                    if (File != INVALID_FILE)
+                    // If not, first assume it to be an app.
+                    app_info* AppInfo = GetResourceAppInfo(Resource);
+                    if (AppInfo)
                     {
-                        Info->Response.Payload = (char*)File;
-                        Info->Response.PayloadSize = FileSizeOf(File);
-                        Info->Response.MimeType = ExtToMIME(Ext);
-                        Info->Response.PayloadIsFile = true;
-                        
-                        Info->Response.StatusCode = 200;
-                        Info->IoStage = IoStage_SendingHeader;
+                        Aux->AppInfo = AppInfo;
+                        Aux->IoStage = IoStage_App;
                     }
-                    else // File not found.
+                    else
                     {
-                        Info->Response.StatusCode = 404;
-                        Info->IoStage = IoStage_SendingHeader;
+                        // If no app was found, a final attempt at it being a file.
+                        PreparePayload(Resource, Aux, Ext);
                     }
-                }
-                else // Not a valid app, nor a file.
-                {
-                    Info->Response.StatusCode = 404;
-                    Info->IoStage = IoStage_SendingHeader;
                 }
             } break;
             
             default: // Implement new Verbs here.
             {
-                Info->Response.StatusCode = 501;
-                Info->IoStage = IoStage_SendingHeader;
+                Aux->Response.StatusCode = 501;
+                Aux->IoStage = IoStage_SendingHeader;
             }
         }
     }
     
     else if (Result == HttpParse_HeaderIncomplete)
     {
-        Info->IoStage = IoStage_Reading;
+        Aux->IoStage = IoStage_Reading;
     }
     
     else if (Result == HttpParse_HeaderInvalid
              || Result == HttpParse_HeaderMalicious)
     {
-        Info->Response.StatusCode = 400;
-        Info->IoStage = IoStage_SendingHeader;
+        Aux->Response.StatusCode = 400;
+        Aux->IoStage = IoStage_SendingHeader;
     }
     
     else if (Result == HttpParse_TooManyHeaders)
     {
-        Info->IoStage = IoStage_Terminating;
+        Aux->IoStage = IoStage_Terminating;
     }
 }
 
 internal void
-SendPayload(ts_io* Conn, io_info* Info, usz Offset)
+SendPayload(ts_io* Conn, io_aux* Aux, usz Offset)
 {
-    if (Info->Response.PayloadIsFile)
+    if (Aux->Response.PayloadIsFile)
     {
         Conn->IoSize -= Offset;
         SendFile(Conn);
@@ -440,39 +432,39 @@ SendPayload(ts_io* Conn, io_info* Info, usz Offset)
 }
 
 internal void
-CleanupInfo(io_info* Info)
+CleanupAux(io_aux* Aux)
 {
     // This frees all memory and blanks everything, except for [.IoBuffer] and
     // [Semaphore], which can be reused in a new connection.
     
-    ClearBuffer(&Info->IoBuffer);
-    if ((Info->Body.Base < Info->IoBuffer.Base)
-        || (Info->Body.Base > (Info->IoBuffer.Base+Info->IoBuffer.Size)))
+    ClearBuffer(&Aux->IoBuffer);
+    if ((Aux->Body.Base < Aux->IoBuffer.Base)
+        || (Aux->Body.Base > (Aux->IoBuffer.Base+Aux->IoBuffer.Size)))
     {
-        buffer Body = Buffer(Info->Body.Base, 0, Info->Body.Size);
+        buffer Body = Buffer(Aux->Body.Base, 0, Aux->Body.Size);
         FreeMemory(&Body);
     }
-    if (Info->Response.Cookies)
+    if (Aux->Response.Cookies)
     {
-        buffer Cookies = Buffer(Info->Response.Cookies, 0, Info->Response.CookiesSize);
+        buffer Cookies = Buffer(Aux->Response.Cookies, 0, Aux->Response.CookiesSize);
         FreeMemory(&Cookies);
     }
-    if (Info->Response.Payload)
+    if (Aux->Response.Payload)
     {
-        if (Info->Response.PayloadIsFile)
+        if (Aux->Response.PayloadIsFile)
         {
-            CloseFileHandle((file)Info->Response.Payload);
+            CloseFileHandle((file)Aux->Response.Payload);
         }
         else
         {
-            buffer Payload = Buffer(Info->Response.Payload, 0, Info->Response.PayloadSize);
+            buffer Payload = Buffer(Aux->Response.Payload, 0, Aux->Response.PayloadSize);
             FreeMemory(&Payload);
         }
     }
-    memset(&Info->Request, 0, sizeof(ts_request));
-    memset(&Info->Body, 0, sizeof(ts_body));
-    memset(&Info->Response, 0, sizeof(ts_response));
-    Info->IoStage = IoStage_None;
+    memset(&Aux->Request, 0, sizeof(ts_request));
+    memset(&Aux->Body, 0, sizeof(ts_body));
+    memset(&Aux->Response, 0, sizeof(ts_response));
+    Aux->IoStage = IoStage_None;
 }
 
 internal void
@@ -484,22 +476,23 @@ CleanupConn(ts_io* Conn)
 }
 
 internal void
-WrapUpTransaction(ts_io* Conn, io_info* Info)
+WrapUpTransaction(ts_io* Conn, io_aux* Aux)
 {
-    if (Info->Response.KeepAlive)
+    if (Aux->Response.KeepAlive
+        && Conn->Status == Status_Connected) // If it's simplex, we need to disconnect.
     {
-        CleanupInfo(Info);
-        Info->IoStage = IoStage_Reading;
+        CleanupAux(Aux);
+        Aux->IoStage = IoStage_Reading;
         Conn->BytesTransferred = 0;
-        Conn->IoBuffer = Info->IoBuffer.Base;
-        Conn->IoSize = Info->IoBuffer.Size;
+        Conn->IoBuffer = Aux->IoBuffer.Base;
+        Conn->IoSize = Aux->IoBuffer.Size;
         memset(Conn->InternalData, 0, TS_INTERNAL_DATA_SIZE);
         RecvData(Conn);
     }
     else
     {
-        Info->IoStage = IoStage_Terminating;
-        DisconnectSocket(Conn);
+        Aux->IoStage = IoStage_Terminating;
+        DisconnectSocket(Conn, TS_DISCONNECT_BOTH);
     }
 }
 
@@ -515,7 +508,7 @@ THREAD_PROC(IoThread)
         {
             // TODO: how to treat this?
         }
-        io_info* Info = (io_info*)&Conn[1];
+        io_aux* Aux = (io_aux*)&Conn[1];
         
         //===========================
         // Check for IO failures.
@@ -523,90 +516,91 @@ THREAD_PROC(IoThread)
         
         if (Conn->Status == Status_Aborted)
         {
-            Info->IoStage = IoStage_Terminating;
-            DisconnectSocket(Conn);
+            Aux->IoStage = IoStage_Terminating;
+            DisconnectSocket(Conn, TS_DISCONNECT_BOTH);
         }
         
         else if (Conn->Status == Status_Error)
         {
             TerminateConn(Conn);
-            CleanupInfo(Info);
+            CleanupAux(Aux);
             CleanupConn(Conn);
-            MPSCFreeListPush(SocketList, Conn);
+            pnp_info* Info = (pnp_info*)(Conn - sizeof(pnp_info*));
+            MPSCFreeListPush(SocketList, Info);
         }
         
         //========================================
         // Process the conn based on the IoStage.
         //========================================
         
-        else if (Info->IoStage == IoStage_Accepting
-                 || Info->IoStage == IoStage_Reading)
+        else if (Aux->IoStage == IoStage_Accepting
+                 || Aux->IoStage == IoStage_Reading)
         {
-            Info->IoBuffer.WriteCur += Conn->BytesTransferred;
-            ProcessReading(Conn, Info);
+            Aux->IoBuffer.WriteCur += Conn->BytesTransferred;
+            ProcessReading(Conn, Aux);
             
             // From here it can go to IoStage_Reading (if recv incomplete or preparing
             // payload), IoStage_App (if it's an app call), IoStage_Sending (if header
             // was refused or error), of IoStage_Terminating (if conn needs to be
             // aborted).
             
-            if (Info->IoStage == IoStage_Reading)
+            if (Aux->IoStage == IoStage_Reading)
             {
-                Conn->IoBuffer = Info->IoBuffer.Base + Info->IoBuffer.WriteCur;
-                Conn->IoSize = Info->IoBuffer.Size - Info->IoBuffer.WriteCur;
+                Conn->IoBuffer = Aux->IoBuffer.Base + Aux->IoBuffer.WriteCur;
+                Conn->IoSize = Aux->IoBuffer.Size - Aux->IoBuffer.WriteCur;
                 RecvData(Conn);
             }
-            else if (Info->IoStage == IoStage_App)
+            else if (Aux->IoStage == IoStage_App)
             {
-                EnterApp(Conn, Info);
+                EnterApp(Conn, Aux);
             }
-            else if (Info->IoStage == IoStage_SendingHeader)
+            else if (Aux->IoStage == IoStage_SendingHeader)
             {
-                PrepareResponse(Conn, Info);
+                PrepareResponse(Conn, Aux);
                 SendData(Conn);
             }
             else // IoStage_Terminating
             {
-                DisconnectSocket(Conn);
+                DisconnectSocket(Conn, TS_DISCONNECT_BOTH);
             }
         }
         
-        else if (Info->IoStage == IoStage_ReadingBody)
+        else if (Aux->IoStage == IoStage_ReadingBody)
         {
             // No processing is done here. This just releases the semaphore so that
             // the app can continue running.
             
-            IncreaseSemaphore(&Info->Semaphore);
+            IncreaseSemaphore(&Aux->Semaphore);
         }
         
-        else if (Info->IoStage == IoStage_App)
+        else if (Aux->IoStage == IoStage_App)
         {
-            Info->IoStage = IoStage_SendingHeader;
-            PrepareResponse(Conn, Info);
+            Aux->IoStage = IoStage_SendingHeader;
+            PrepareResponse(Conn, Aux);
             SendData(Conn);
         }
         
-        else if (Info->IoStage == IoStage_SendingHeader)
+        else if (Aux->IoStage == IoStage_SendingHeader)
         {
             if (Conn->BytesTransferred == Conn->IoSize)
             {
-                if (Info->Response.CookiesSize > 0)
+                if (Aux->Response.CookiesSize > 0)
                 {
-                    Info->IoStage = IoStage_SendingCookie;
-                    Conn->IoBuffer = (u8*)Info->Response.Cookies;
-                    Conn->IoSize = Info->Response.CookiesSize;
+                    Aux->IoStage = IoStage_SendingCookie;
+                    Conn->IoBuffer = (u8*)Aux->Response.Cookies;
+                    Conn->IoSize = Aux->Response.CookiesSize;
                     SendData(Conn);
                 }
-                else if (Info->Response.PayloadSize > 0)
+                else if (Aux->Response.PayloadSize > 0)
                 {
-                    Info->IoStage = IoStage_SendingPayload;
-                    Conn->IoFile = (file)Info->Response.Payload;
-                    Conn->IoSize = Info->Response.PayloadSize;
-                    SendPayload(Conn, Info, 0);
+                    Aux->IoStage = IoStage_SendingPayload;
+                    Conn->IoFile = (file)Aux->Response.Payload;
+                    Conn->IoSize = Aux->Response.PayloadSize;
+                    SendPayload(Conn, Aux, 0);
                 }
                 else
                 {
-                    WrapUpTransaction(Conn, Info);
+                    WrapUpTransaction(Conn, Aux);
                 }
             }
             else
@@ -617,20 +611,20 @@ THREAD_PROC(IoThread)
             }
         }
         
-        else if (Info->IoStage == IoStage_SendingCookie)
+        else if (Aux->IoStage == IoStage_SendingCookie)
         {
             if (Conn->BytesTransferred == Conn->IoSize)
             {
-                if (Info->Response.PayloadSize > 0)
+                if (Aux->Response.PayloadSize > 0)
                 {
-                    Info->IoStage = IoStage_SendingPayload;
-                    Conn->IoFile = (file)Info->Response.Payload;
-                    Conn->IoSize = Info->Response.PayloadSize;
-                    SendPayload(Conn, Info, 0);
+                    Aux->IoStage = IoStage_SendingPayload;
+                    Conn->IoFile = (file)Aux->Response.Payload;
+                    Conn->IoSize = Aux->Response.PayloadSize;
+                    SendPayload(Conn, Aux, 0);
                 }
                 else
                 {
-                    WrapUpTransaction(Conn, Info);
+                    WrapUpTransaction(Conn, Aux);
                 }
             }
             else
@@ -641,22 +635,23 @@ THREAD_PROC(IoThread)
             }
         }
         
-        else if (Info->IoStage == IoStage_SendingPayload)
+        else if (Aux->IoStage == IoStage_SendingPayload)
         {
             if (Conn->BytesTransferred == Conn->IoSize)
             {
-                WrapUpTransaction(Conn, Info);
+                WrapUpTransaction(Conn, Aux);
             }
             else
             {
-                SendPayload(Conn, Info, Conn->BytesTransferred);
+                SendPayload(Conn, Aux, Conn->BytesTransferred);
             }
         }
         
-        else if (Info->IoStage == IoStage_Terminating)
+        else if (Aux->IoStage == IoStage_Terminating)
         {
-            CleanupInfo(Info);
+            CleanupAux(Aux);
             CleanupConn(Conn);
+            pnp_info* Info = (pnp_info*)(Conn - sizeof(pnp_info*));
             MPSCFreeListPush(SocketList, Conn);
         }
     }
@@ -694,21 +689,19 @@ PnpAppServer(parsed_args Args)
     
     usz MaxNumConns = 1024;
     usz IoPageSize = Kilobyte(4);
-    usz FullConnSize = sizeof(ts_io) + sizeof(io_info);
-    usz IoBufferSize = IoPageSize - FullConnSize;
+    usz IoBufferSize = IoPageSize - sizeof(pnp_info);
     buffer SocketMem = GetMemory(MaxNumConns * IoPageSize, NULL, MEM_WRITE);
     
     mpsc_freelist SocketList;
     InitMPSCFreeList(&SocketList);
     for (usz Count = 0; Count < MaxNumConns; Count++)
     {
-        ts_io* Conn = PushSize(&SocketMem, IoPageSize, ts_io);
-        Conn->Socket = INVALID_FILE;
-        io_info* Info = (io_info*)&Conn[1];
-        Info->IoBuffer.Base = (u8*)Conn + FullConnSize;
-        Info->IoBuffer.Size = IoBufferSize;
-        Info->Semaphore = InitSemaphore(0);
-        MPSCFreeListPush(&SocketList, Conn);
+        pnp_info* Info = PushSize(&SocketMem, IoPageSize, pnp_info);
+        Info->Conn.Socket = INVALID_FILE;
+        Info->Aux.IoBuffer.Base = (u8*)Info + sizeof(pnp_info);
+        Info->Aux.IoBuffer.Size = IoBufferSize;
+        Info->Aux.Semaphore = InitSemaphore(0);
+        MPSCFreeListPush(&SocketList, Info);
     }
     
     u32 NumThreads = 1; //gSysInfo.NumThreads;
@@ -723,17 +716,16 @@ PnpAppServer(parsed_args Args)
         ts_listen Listen = ListenForConnections();
         if (Listen.Socket != INVALID_FILE)
         {
-            ts_io* Conn = (ts_io*)MPSCFreeListPop(&SocketList);
-            if (Conn)
+            pnp_info* Info = (pnp_info*)MPSCFreeListPop(&SocketList);
+            if (Info)
             {
-                io_info* Info = (io_info*)&Conn[1];
-                Info->IoStage = IoStage_Accepting;
-                Conn->IoBuffer = Info->IoBuffer.Base;
-                Conn->IoSize = Info->IoBuffer.Size;
+                Info->Aux.IoStage = IoStage_Accepting;
+                Info->Conn.IoBuffer = Info->Aux.IoBuffer.Base;
+                Info->Conn.IoSize = Info->Aux.IoBuffer.Size;
                 
-                if (!AcceptConn(Listen, Conn))
+                if (!AcceptConn(Listen, &Info->Conn))
                 {
-                    MPSCFreeListPush(&SocketList, Conn);
+                    MPSCFreeListPush(&SocketList, Info);
                 }
             }
             else

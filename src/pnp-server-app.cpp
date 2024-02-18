@@ -8,9 +8,9 @@ internal http_buf
 AppGetHeaderByKey(http* Http, char* Key)
 {
     ts_io* Conn = (ts_io*)Http->Object;
-    io_info* Info = (io_info*)&Conn[1];
+    io_aux* Aux = (io_aux*)&Conn[1];
     
-    string Header = GetHeaderByKey(&Info->Request, Key);
+    string Header = GetHeaderByKey(&Aux->Request, Key);
     http_buf Result = { Header.Base, Header.WriteCur };
     return Result;
 }
@@ -19,9 +19,9 @@ internal http_buf
 AppGetHeaderByIdx(http* Http, u32 Idx)
 {
     ts_io* Conn = (ts_io*)Http->Object;
-    io_info* Info = (io_info*)&Conn[1];
+    io_aux* Aux = (io_aux*)&Conn[1];
     
-    string Header = GetHeaderByIdx(&Info->Request, Idx);
+    string Header = GetHeaderByIdx(&Aux->Request, Idx);
     http_buf Result = { Header.Base, Header.WriteCur };
     return Result;
 }
@@ -30,11 +30,11 @@ internal int
 AppRecvFullRequestBody(http* Http, size_t MaxBodySize)
 {
     ts_io* Conn = (ts_io*)Http->Object;
-    io_info* Info = (io_info*)&Conn[1];
+    io_aux* Aux = (io_aux*)&Conn[1];
     
-    if (!RecvFullRequestBody(Conn, &Info->Body, MaxBodySize))
+    if (!RecvFullRequestBody(Conn, &Aux->Body, MaxBodySize))
     {
-        Http->ReturnCode = Info->Response.StatusCode;
+        Http->ReturnCode = Aux->Response.StatusCode;
         return 0;
     }
     return 1;
@@ -44,9 +44,9 @@ internal http_form
 AppParseFormData(http* Http)
 {
     ts_io* Conn = (ts_io*)Http->Object;
-    io_info* Info = (io_info*)&Conn[1];
+    io_aux* Aux = (io_aux*)&Conn[1];
     
-    ts_multiform Form = ParseFormData(Info->Body);
+    ts_multiform Form = ParseFormData(Aux->Body);
     http_form Result = { Http, Form.FieldCount, Form.FirstField };
     return Result;
 }
@@ -85,12 +85,12 @@ internal void*
 AppAllocPayload(http* Http, usz Size)
 {
     ts_io* Conn = (ts_io*)Http->Object;
-    io_info* Info = (io_info*)&Conn[1];
+    io_aux* Aux = (io_aux*)&Conn[1];
     
     buffer Mem = GetMemory(Size, 0, MEM_WRITE);
     if (Mem.Base)
     {
-        Info->Response.Payload = (char*)Mem.Base;
+        Aux->Response.Payload = (char*)Mem.Base;
     }
     return Mem.Base;
 }
@@ -99,12 +99,12 @@ internal void*
 AppAllocCookies(http* Http, usz Size)
 {
     ts_io* Conn = (ts_io*)Http->Object;
-    io_info* Info = (io_info*)&Conn[1];
+    io_aux* Aux = (io_aux*)&Conn[1];
     
     buffer Mem = GetMemory(Size, 0, MEM_WRITE);
     if (Mem.Base)
     {
-        Info->Response.Cookies = (char*)Mem.Base;
+        Aux->Response.Cookies = (char*)Mem.Base;
     }
     return Mem.Base;
 }

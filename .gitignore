@@ -3,6 +3,6 @@
 /example/modify/
 /example/prime/
 /src/.vscode/
+/src/build-debug.sh
 .vscode/
 afazer.txt
-

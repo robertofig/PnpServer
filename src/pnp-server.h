@@ -55,7 +55,7 @@ enum io_stage
     IoStage_Terminating,
 };
 
-struct io_info
+struct io_aux
 {
     io_stage IoStage;
     buffer IoBuffer;
@@ -66,6 +66,13 @@ struct io_info
     
     app_info* AppInfo;
     semaphore Semaphore;
+};
+
+struct pnp_info
+{
+    pnp_info* volatile Next;
+    ts_io Conn;
+    io_aux Aux;
 };
 
 global pnp_server gServerInfo;

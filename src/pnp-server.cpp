@@ -327,26 +327,13 @@ ProcessReading(ts_io* Conn, io_aux* Aux)
             case HttpVerb_Put:
             {
                 Aux->Body = GetBodyInfo(&Aux->Request);
-                if (Aux->Body.Base)
-                {
-                    // This may not be the entire body. Further reads to receive
-                    // the rest of the body may be performed in the app, if
-                    // necessary.
-                    
-                    if (Aux->Body.Size > SERVER_MAX_BODY_SIZE)
-                    {
-                        // Body too large, break connection.
-                        Aux->IoStage = IoStage_Terminating;
-                        break;
-                    }
-                    else { /* Falls back to HttpVerb_Delete below. */ }
-                }
-                else
+                if (!Aux->Body.Base)
                 {
                     Aux->Response.StatusCode = 400;
                     Aux->IoStage = IoStage_SendingHeader;
                     break;
                 }
+                // Else, falls back on HttpVerb_Delete below.
             }
             
             case HttpVerb_Delete:

@@ -8,7 +8,6 @@
 
 
 #define APP_ARENA_SIZE Megabyte(1) // Per-app fized memory size.
-#define SERVER_MAX_BODY_SIZE Megabyte(100) // If payload is larger than this, drop conn.
 
 typedef void (*app_init)(void*);
 typedef void (*module_main)(void*, void*);

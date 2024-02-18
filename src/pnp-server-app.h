@@ -149,7 +149,7 @@ typedef struct http
     http_form_field (*GetFormFieldByName)(http_form, char*);
     http_form_field (*GetFormFieldByIdx)(http_form, size_t);
     void* (*AllocPayload)(struct http*, size_t);
-    void* (*AllocCookies)(struct http*, size_t);
+    void* (*AllocCookies)(struct http*, unsigned short);
 } http;
 
 //==============================
@@ -202,10 +202,10 @@ void* AllocPayload(http* Http, size_t Size)
 
 /* Allocates a block of memory of [Size] bytes, and sets it internally as the
  |  buffer to be sent as response payload. Must not be freed by app, nor attempted
-|  to write past [Size].
+ |  to write past [Size].
 |--- Return: pointer of memory block, or NULL if allocation failed. */
 
-void* AllocCookies(http* Http, size_t Size)
+void* AllocCookies(http* Http, unsigned short Size)
 { return Http->AllocCookies(Http, Size); }
 
 /* Allocates a block of memory of [Size] bytes, and sets it internally as the

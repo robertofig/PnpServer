@@ -96,7 +96,7 @@ AppAllocPayload(http* Http, usz Size)
 }
 
 internal void*
-AppAllocCookies(http* Http, usz Size)
+AppAllocCookies(http* Http, u16 Size)
 {
     ts_io* Conn = (ts_io*)Http->Object;
     io_aux* Aux = (io_aux*)&Conn[1];

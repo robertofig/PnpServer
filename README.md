@@ -36,11 +36,9 @@ All one needs to do is drop the folder in the root dir, the server will automati
 
 The build script is located in `/src`, and builds to a `/build` directory in the project root. It can be simply run from command line, provided the compiler symbols are loaded. Currently only supports MSVC on Windows, but a version for Clang is in the making, and in the future a version for Linux using GCC. It is configured to build both a release version and a debug version, although debug version comes commented out.
 
-PnP Server depends on some files from TinyBase and TinyServer. Both these projects come in the `/include` directory as git submodules. To pull them there, run `git submodule update --remote` from the PnpServer root dir. Alternatively, one can change the `TinyBase` and `TinyServer` variables in the build script to point to a different path for these libraries.
-
 ## How to build an app
 
-To build an app to it, one must included the [pnp-server-app.h](src/pnp-server-app.h) header file, present in the `/include` dir. You can copy it to the app working area and include it from there. It must also contain the following two functions:
+To build an app to it, one must included the [pnp-server-app.h](src/pnp-server-app.h) header file, present in the `/src` dir. You can copy it to the app working area and include it from there. It must also contain the following two functions:
 
 ```c
 void ModuleMain(http* Http, app_arena* Arena);
